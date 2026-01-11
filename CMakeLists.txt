@@ -27,46 +27,40 @@ endif()
 target_link_libraries(ecewo_helmet PUBLIC ecewo::ecewo)
 
 if (PROJECT_IS_TOP_LEVEL AND TARGET ecewo::ecewo)
+  ecewo_plugin(mock)
+  enable_testing()
 
-  ecewo_add_plugin(mock)
+  add_executable(ecewo_helmet_test
+    tests/test.c
+    tests/runner.c
+  )
 
-  option(ECEWO_HELMET_BUILD_TESTS "Build tests" ON)
+  target_include_directories(ecewo_helmet_test
+    PRIVATE
+      ${CMAKE_CURRENT_SOURCE_DIR}/src
+      ${CMAKE_CURRENT_SOURCE_DIR}/tests
+  )
 
-  if (ECEWO_HELMET_BUILD_TESTS)
-    enable_testing()
+  target_link_libraries(ecewo_helmet_test
+    PRIVATE
+      ecewo::ecewo
+      ecewo::helmet
+      ecewo::mock
+  )
 
-    add_executable(ecewo_helmet_test
-      tests/test.c
-      tests/runner.c
-    )
-
-    target_include_directories(ecewo_helmet_test
-      PRIVATE
-        ${CMAKE_CURRENT_SOURCE_DIR}/src
-        ${CMAKE_CURRENT_SOURCE_DIR}/tests
-    )
-
-    target_link_libraries(ecewo_helmet_test
-      PRIVATE
-        ecewo::ecewo
-        ecewo::helmet
-        ecewo::mock
-    )
-
-    if (CMAKE_C_COMPILER_ID MATCHES "GNU|Clang")
-      target_compile_options(ecewo_helmet_test PRIVATE
-        -Wall
-        -Wextra
-        -Werror
-        -Wstrict-prototypes
-        -Wincompatible-pointer-types
-        -Wno-unused-parameter
-      )
-    endif()
-
-    add_test(
-      NAME ECEWO_HELMET_all
-      COMMAND ecewo_helmet_test
+  if (CMAKE_C_COMPILER_ID MATCHES "GNU|Clang")
+    target_compile_options(ecewo_helmet_test PRIVATE
+      -Wall
+      -Wextra
+      -Werror
+      -Wstrict-prototypes
+      -Wincompatible-pointer-types
+      -Wno-unused-parameter
     )
   endif()
+
+  add_test(
+    NAME ECEWO_HELMET_all
+    COMMAND ecewo_helmet_test
+  )
 endif()
