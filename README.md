@@ -4,6 +4,7 @@ The `ecewo-helmet` plugin is for automaticaly setting security headers.
 
 ## Table of Contents
 
+1. [Installation](#installation)
 2. [Default Helmet Configuration](#default-helmet-configuration)
 3. [Custom Helmet Configuration](#custom-helmet-configuration)
 4. [Configuration Options](#configuration-options)
@@ -13,6 +14,19 @@ The `ecewo-helmet` plugin is for automaticaly setting security headers.
     2. [HTTP Strict Transport Security (HSTS)](#http-strict-transport-security-hsts)
     3. [Frame Options](#frame-options)
     4. [Referrer Policy](#referrer-policy)
+
+## Installation
+
+Add to your `CMakeLists.txt`:
+
+```sh
+ecewo_plugin(helmet)
+
+target_link_libraries(app PRIVATE
+    ecewo::ecewo
+    ecewo::helmet
+)
+```
 
 ## Default Helmet Configuration
 
