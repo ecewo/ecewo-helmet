@@ -20,7 +20,7 @@ The `ecewo-helmet` plugin is for automaticaly setting security headers.
 Add to your `CMakeLists.txt`:
 
 ```sh
-ecewo_plugin(helmet)
+ecewo_add(helmet)
 
 target_link_libraries(app PRIVATE
     ecewo::ecewo
@@ -37,51 +37,53 @@ Default configuration is enough for many applications. If you would like to cust
 #include "ecewo-helmet.h"
 #include <stdio.h>
 
+void example_handler(ecewo_request_t *req, ecewo_response_t *res)
+{
+    ecewo_send_text(res, 200, "Hello");
+}
+
 int main(void)
 {
-    if (server_init() != SERVER_OK)
+    ecewo_app_t *app = ecewo_create();
+    if (!app)
     {
-        fprintf(stderr, "Failed to initialize server\n");
+        fprintf(stderr, "Failed to create app\n");
         return 1;
     }
 
-    // Enable security headers with defaults
-    helmet_init(NULL);
+    // Enable security headers with defaults (pass NULL for the config)
+    ecewo_helmet_install(app, NULL);
     // Response headers:
+    // Content-Security-Policy: default-src 'self'
     // Strict-Transport-Security: max-age=31536000
     // X-Frame-Options: SAMEORIGIN
     // X-Content-Type-Options: nosniff
-    // X-XSS-Protection: 1; mode=block
+    // X-XSS-Protection: 0
     // Referrer-Policy: strict-origin-when-cross-origin
     // X-Download-Options: noopen
-    // NO Content-Security-Policy
-    
-    get("/", example_handler);
-    
-    if (server_listen(3000) != SERVER_OK)
-    {
-        fprintf(stderr, "Failed to start server\n");
-        return 1;
-    }
 
-    server_run();
+    ECEWO_GET(app, "/", example_handler);
+
+    ecewo_listen(app, 3000);
     return 0;
 }
 ```
 
-**Why is CSP not enabled by default?**
+The configuration is an **opaque handle** rather than a public struct, so the
+plugin's ABI stays stable even as new options are added. You build it with the
+`ecewo_helmet_config_*()` setters and hand it to `ecewo_helmet_install()`, which
+takes ownership of it.
 
-Content Security Policy is the most effective protection against XSS attacks, but it's also the most complex header to configure. Different applications have vastly different requirements.
+**About the default CSP**
 
-Rather than providing a restrictive default that breaks most applications, we leave CSP as opt-in. This follows the approach of most modern frameworks.
+Content Security Policy is the most effective protection against XSS attacks, but it's also the most complex header to configure. The default is the strict `default-src 'self'`, which only permits resources from the same origin. Most applications will need to relax it for their own assets (CDNs, analytics, inline styles, etc.).
 
-**To enable CSP (recommended for production):**
+**To customize CSP (recommended for production):**
 ```c
-Helmet config = {
-    .csp = "default-src 'self'; script-src 'self' https://trusted-cdn.com"
-};
+ecewo_helmet_config_t *config = ecewo_helmet_config_new();
+ecewo_helmet_config_set_csp(config, "default-src 'self'; script-src 'self' https://trusted-cdn.com");
 
-helmet_init(&config);
+ecewo_helmet_install(app, config); // consumes config
 ```
 
 See the [CSP Directive Reference](#csp-directive-reference) section for more information.
@@ -93,76 +95,79 @@ See the [CSP Directive Reference](#csp-directive-reference) section for more inf
 #include "ecewo-helmet.h"
 #include <stdio.h>
 
-static const Helmet helmet_config = {
-    // Content Security Policy - Controls what resources can be loaded
-    .csp = "default-src 'self'; "                                                 // Only allow resources from same origin by default
-           "script-src 'self' https://www.googletagmanager.com 'unsafe-inline'; " // Allow scripts from self, Google Tag Manager, and inline scripts
-           "style-src 'self' 'unsafe-inline'; "                                   // Allow styles from self and inline styles (for dynamic styling)
-           "img-src 'self' data: https:; "                                        // Allow images from self, data URIs, and any HTTPS source
-           "connect-src 'self' https://www.google-analytics.com",                 // Allow AJAX/fetch to self and Google Analytics
-
-    // HTTP Strict Transport Security - Force HTTPS for 2 years
-    .hsts_max_age = "63072000", // 2 years in seconds
-    .hsts_subdomains = true,    // Apply HTTPS enforcement to all subdomains
-    .hsts_preload = true,       // Submit to browser preload list (permanent, irreversible!)
-
-    // Clickjacking Protection
-    .frame_options = "DENY", // Never allow this site to be embedded in iframes (most secure)
-
-    // Privacy - Don't leak referrer information
-    .referrer_policy = "no-referrer", // Never send referrer header to any destination
-
-    // XSS Protection - Disabled because modern CSP is better
-    .xss_protection = "0", // Disable legacy XSS filter (can cause vulnerabilities, rely on CSP instead)
-
-    // MIME Type Security
-    .nosniff = true, // Prevent browsers from MIME-sniffing responses (force declared content-type)
-
-    // IE-specific Security
-    .ie_no_open = true, // Prevent IE from executing downloads in site's context
-};
-
 int main(void)
 {
-    if (server_init() != SERVER_OK)
+    ecewo_app_t *app = ecewo_create();
+    if (!app)
     {
-        fprintf(stderr, "Failed to initialize server\n");
+        fprintf(stderr, "Failed to create app\n");
         return 1;
     }
 
-    // Enable security headers with defaults
-    helmet_init(&helmet_config);
-    
-    get("/", example_handler);
-    
-    if (server_listen(3000) != SERVER_OK)
-    {
-        fprintf(stderr, "Failed to start server\n");
-        return 1;
-    }
+    ecewo_helmet_config_t *config = ecewo_helmet_config_new();
 
-    server_run();
+    // Content Security Policy - Controls what resources can be loaded
+    ecewo_helmet_config_set_csp(config,
+        "default-src 'self'; "                                                 // Only allow resources from same origin by default
+        "script-src 'self' https://www.googletagmanager.com 'unsafe-inline'; " // Allow scripts from self, Google Tag Manager, and inline scripts
+        "style-src 'self' 'unsafe-inline'; "                                   // Allow styles from self and inline styles (for dynamic styling)
+        "img-src 'self' data: https:; "                                        // Allow images from self, data URIs, and any HTTPS source
+        "connect-src 'self' https://www.google-analytics.com");                // Allow AJAX/fetch to self and Google Analytics
+
+    // HTTP Strict Transport Security - Force HTTPS for 2 years, all subdomains,
+    // and submit to the browser preload list (permanent, irreversible!)
+    ecewo_helmet_config_set_hsts(config, "63072000", true, true);
+
+    // Clickjacking Protection - never allow this site to be embedded in iframes
+    ecewo_helmet_config_set_frame_options(config, "DENY");
+
+    // Privacy - never send the referrer header to any destination
+    ecewo_helmet_config_set_referrer_policy(config, "no-referrer");
+
+    // XSS Protection - disable the legacy filter (rely on CSP instead)
+    ecewo_helmet_config_set_xss_protection(config, "0");
+
+    // MIME Type Security - force browsers to honor the declared content-type
+    ecewo_helmet_config_set_nosniff(config, true);
+
+    // IE-specific Security - prevent IE from executing downloads in-context
+    ecewo_helmet_config_set_ie_no_open(config, true);
+
+    // Enable security headers with the custom config (consumes config)
+    ecewo_helmet_install(app, config);
+
+    ECEWO_GET(app, "/", example_handler);
+
+    ecewo_listen(app, 3000);
     return 0;
 }
 ```
 
-> [!IMPORTANT]
+> [!NOTE]
 >
-> All strings in helmet config must have static lifetime.
+> `ecewo_helmet_install()` takes ownership of the config: its values are copied
+> into the app arena and the handle is freed for you. Do not free or reuse it
+> afterwards. If you build a config but decide not to install it, release it with
+> `ecewo_helmet_config_free()`.
+>
+> Pass `NULL` to any string setter (e.g. `ecewo_helmet_config_set_csp(config, NULL)`
+> or `ecewo_helmet_config_set_hsts(config, NULL, false, false)`) to disable that
+> header entirely.
 
 ## Configuration Options
 
-| Field                  | Type           | Default                             | Description              |
-|------------------------|----------------|-------------------------------------|--------------------------|
-| `csp`                  | `const char*`  | `NULL`                              | Content Security Policy  |
-| `hsts_max_age`         | `const char*`  | `"31536000"`                        | HSTS duration (seconds)  |
-| `hsts_subdomains`      | `bool`         | `false`                             | Apply HSTS to subdomains |
-| `hsts_preload`         | `bool`         | `false`                             | Enable HSTS preload      |
-| `frame_options`        | `const char*`  | `"SAMEORIGIN"`                      | X-Frame-Options          |
-| `referrer_policy`      | `const char*`  | `"strict-origin-when-cross-origin"` | Referrer-Policy          |
-| `xss_protection`       | `const char*`  | `"1; mode=block"`                   | X-XSS-Protection         |
-| `nosniff`              | `bool`         | `true`                              | X-Content-Type-Options   |
-| `ie_no_open`           | `bool`         | `true`                              | X-Download-Options       |
+A fresh config from `ecewo_helmet_config_new()` starts with these secure
+defaults. Override any of them with the corresponding setter.
+
+| Setter                                  | Default                             | Header                   |
+|-----------------------------------------|-------------------------------------|--------------------------|
+| `ecewo_helmet_config_set_csp`           | `"default-src 'self'"`              | Content-Security-Policy  |
+| `ecewo_helmet_config_set_hsts`          | `"31536000"`, no subdomains/preload | Strict-Transport-Security|
+| `ecewo_helmet_config_set_frame_options` | `"SAMEORIGIN"`                      | X-Frame-Options          |
+| `ecewo_helmet_config_set_referrer_policy` | `"strict-origin-when-cross-origin"` | Referrer-Policy        |
+| `ecewo_helmet_config_set_xss_protection`| `"0"`                               | X-XSS-Protection         |
+| `ecewo_helmet_config_set_nosniff`       | `true`                              | X-Content-Type-Options   |
+| `ecewo_helmet_config_set_ie_no_open`    | `true`                              | X-Download-Options       |
 
 ## CSP Directive Reference
 
@@ -196,18 +201,18 @@ Prevents XSS attacks by controlling resource loading:
 
 ```c
 // Strict: only same-origin scripts/styles
-.csp = "default-src 'self'"
+ecewo_helmet_config_set_csp(config, "default-src 'self'");
 
 // Allow CDN for scripts
-.csp = "default-src 'self'; script-src 'self' https://cdn.example.com"
+ecewo_helmet_config_set_csp(config, "default-src 'self'; script-src 'self' https://cdn.example.com");
 
 // Allow inline styles (for styled-components, etc.)
-.csp = "default-src 'self'; style-src 'self' 'unsafe-inline'"
+ecewo_helmet_config_set_csp(config, "default-src 'self'; style-src 'self' 'unsafe-inline'");
 
 // Allow Google Fonts and Analytics
-.csp = "default-src 'self'; "
-       "font-src 'self' https://fonts.gstatic.com; "
-       "script-src 'self' https://www.googletagmanager.com"
+ecewo_helmet_config_set_csp(config, "default-src 'self'; "
+                                    "font-src 'self' https://fonts.gstatic.com; "
+                                    "script-src 'self' https://www.googletagmanager.com");
 ```
 
 ### HTTP Strict Transport Security (HSTS)
@@ -216,16 +221,13 @@ Forces HTTPS connections:
 
 ```c
 // Basic: 1 year HTTPS only
-.hsts_max_age = "31536000"
+ecewo_helmet_config_set_hsts(config, "31536000", false, false);
 
 // With subdomains: include api.example.com, www.example.com
-.hsts_max_age = "31536000",
-.hsts_subdomains = true
+ecewo_helmet_config_set_hsts(config, "31536000", true, false);
 
 // Preload list: browsers always use HTTPS (permanent)
-.hsts_max_age = "63072000",
-.hsts_subdomains = true,
-.hsts_preload = true  // Irreversible
+ecewo_helmet_config_set_hsts(config, "63072000", true, true); // Irreversible
 ```
 
 ### Frame Options
@@ -233,8 +235,8 @@ Forces HTTPS connections:
 Prevents clickjacking:
 
 ```c
-.frame_options = "DENY"        // Never allow iframes
-.frame_options = "SAMEORIGIN"  // Only same-origin iframes (default)
+ecewo_helmet_config_set_frame_options(config, "DENY");       // Never allow iframes
+ecewo_helmet_config_set_frame_options(config, "SAMEORIGIN"); // Only same-origin iframes (default)
 ```
 
 ### Referrer Policy
@@ -242,7 +244,7 @@ Prevents clickjacking:
 Controls referrer information:
 
 ```c
-.referrer_policy = "no-referrer"                        // Never send referrer
-.referrer_policy = "strict-origin-when-cross-origin"    // Default
-.referrer_policy = "same-origin"                        // Only same-origin
+ecewo_helmet_config_set_referrer_policy(config, "no-referrer");                     // Never send referrer
+ecewo_helmet_config_set_referrer_policy(config, "strict-origin-when-cross-origin"); // Default
+ecewo_helmet_config_set_referrer_policy(config, "same-origin");                     // Only same-origin
 ```
