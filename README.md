@@ -20,7 +20,7 @@ The `ecewo-helmet` plugin is for automaticaly setting security headers.
 Add to your `CMakeLists.txt`:
 
 ```sh
-ecewo_add(helmet)
+ecewo_add(helmet@v0.2.0)
 
 target_link_libraries(app PRIVATE
     ecewo::ecewo
